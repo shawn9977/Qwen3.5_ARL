@@ -19,7 +19,7 @@
 
 Qwen3.5 OpenVINO 支持基于 optimum-intel PR #1634（[OpenVINO] Support Qwen3.5 and Qwen3.5-MoE）。
 
-### 3.1 安装导出依赖
+### 2.1 安装导出依赖
 
 ```bash
 conda create -n qwen35 python=3.12
@@ -33,7 +33,7 @@ pip install requests torchvision opencv-python
 
 ```
 
-### 3.2 导出前环境配置
+### 2.2 导出前环境配置
 
 ```bash
 # 国内用户使用 HuggingFace 镜像，避免下载失败
@@ -48,7 +48,7 @@ export TMPDIR=/mnt/disk5/temp_space && mkdir -p $TMPDIR
 
 **内存要求：** 导出 35B-A3B 模型需要约 **200 GB+ 系统 RAM**（转换和量化过程中保存全精度权重）。较小模型（0.8B、9B）使用默认 `/tmp` 和 32 GB RAM 通常足够。
 
-### 3.3 导出命令
+### 2.3 导出命令
 
 所有 Qwen3.5 模型均为视觉语言模型，必须加 `--task image-text-to-text`。
 
@@ -82,7 +82,7 @@ optimum-cli export openvino \
   Qwen3.5-35B-A3B-INT4
 ```
 
-### 3.4 导出产物结构
+### 2.4 导出产物结构
 
 每个导出模型目录包含：
 
@@ -100,9 +100,9 @@ Qwen3.5-*-INT4/
 
 ---
 
-## 四、ARL推理运行环境搭建
+## 三、ARL推理运行环境搭建
 
-### 4.1 创建 Python 环境
+### 3.1 创建 Python 环境
 
 **conda 环境（本文档使用，ARL 机器）**
 
@@ -118,12 +118,12 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-> 如果 `pip install -r requirements.txt` 报错（版本冲突等），请参考**六、完整安装步骤**中的分步安装方法，以及**十三、requirements.txt 修复**中的说明。
+> 如果 `pip install -r requirements.txt` 报错（版本冲突等），请参考**四、完整安装步骤**中的分步安装方法，以及**十、requirements.txt 修复**中的说明。
 
 
 ---
 
-### 4.1.1 核心依赖版本
+### 3.1.1 核心依赖版本
 
 | 包 | 版本 / 来源 |
 |---|---|
@@ -139,11 +139,11 @@ pip install -r requirements.txt
 
 ---
 
-### 4.2 OpenVINO 安装方式
+### 3.2 OpenVINO 安装方式
 
 
 
-#### 4.2.1  从源码构建 OpenVINO（仅 MoE 模型需要 ）
+#### 3.2.1  从源码构建 OpenVINO（仅 MoE 模型需要 ）
 
 已提供包含所有修复的补丁：`ov_patch/ptl_igpu_moe_fix.patch`（基于 OpenVINO commit `35d22f2a0e`）。
 
@@ -182,7 +182,7 @@ export LD_LIBRARY_PATH="/home/intel/Qwen3.5_ARL/openvino_35d22/bin/intel64/Relea
 
 ---
 
-### 4.3 验证 GPU 设备
+### 3.3 验证 GPU 设备
 
 ```bash
 python -c "
@@ -200,42 +200,11 @@ Intel(R) Arc(TM) Graphics (iGPU)
 
 ---
 
-## 五、功能验证（Functional Sanity Test）
-
-环境搭建完成后，在正式 benchmark 前用 `test_qwen3.5.py` 验证模型能正确加载并推理。
-
-```bash
-cd /home/intel/Qwen3.5_ARL/
-python test_qwen3.5.py
-```
-
-脚本通过 `OVModelForVisualCausalLM` 加载模型，在 GPU 上编译，并运行一次样例推理。关键说明：
-- 脚本传入 `ov_config={"CACHE_DIR": ""}` 禁用模型缓存，避免 GPU plugin 动态 shape 处理的已知问题。
-- 修改脚本中的 `model_dir` 和 `device` 变量可测试不同模型或设备。
-
-验证所有组件均在 GPU.0 上运行：
-```
-Execution devices:
-  - language_model: ['GPU.0']
-  - vision_embeddings: ['GPU.0']
-  - vision_embeddings_merger: ['GPU.0']
-  - vision_embeddings_pos: ['GPU.0']
-```
-
-> **注意（本机 ARL）：** 运行 35B-A3B 时如遇 `CL_OUT_OF_RESOURCES` 崩溃，说明 iGPU 显存不足，
-> 改用 `device = "AUTO:GPU,CPU"` 或 `device = "CPU"`。
 
 
-## 六、完整安装步骤
+## 四、完整安装步骤
 
-### 步骤1：修复 requirements.txt
-
-按照**十三、requirements.txt 修复**中的说明修改文件，然后将 `transformers==5.2.0` **临时**改为：
-```
-transformers>=4.45,<5.1
-```
-
-### 步骤2：安装所有非 git 包
+### 步骤1：安装所有非 git 包
 
 ```bash
 grep -v "git+" requirements.txt | pip install -r /dev/stdin
@@ -247,37 +216,18 @@ optimum-intel requires transformers<4.58,>=4.45, but you have transformers 5.2.0
 optimum-onnx requires transformers<4.58.0,>=4.36, but you have transformers 5.2.0
 ```
 
-### 步骤3：将 transformers 升级到 5.2.0
-
-```bash
-pip install transformers==5.2.0 --no-deps
-```
-
-> `--no-deps`：只升级 transformers 本身，跳过依赖版本约束检查。
-
-### 步骤4：用 `--no-deps` 安装 git 包（跳过版本约束检查）
+### 步骤2：用 `--no-deps` 安装 git 包（跳过版本约束检查）
 
 ```bash
 pip install --no-deps \
   "optimum @ git+https://github.com/huggingface/optimum@3db78a41a715a04d4629e21cec4e7b1790c8266f" \
-  "optimum-intel @ git+https://github.com/rkazants/optimum-intel.git@4602e000f4ca2c0e04a03c3633d30703b6bb0b05"
+  "optimum-intel @ git+https://github.com/rkazants/optimum-intel.git@4602e000f4ca2c0e04a03c3633d30703b6bb0b05" \
+  "optimum-onnx @ git+https://github.com/huggingface/optimum-onnx.git@7c9ccd7331403147c6b2a9f9440cd31f470a08f4"
 ```
 
-> `--no-deps` 的作用：只安装代码本身，不让 pip 重新验证 `transformers<5.1` 约束。  
-> optimum-onnx 会由 optimum-intel 自动拉取 branch `xadupre/transformers5`。
+> `--no-deps` 的作用：只安装代码本身，不让 pip 重新验证 `transformers<5.1` 约束。
 
-### 步骤5：将 requirements.txt 中 transformers 还原
-
-将之前临时改的 `transformers>=4.45,<5.1` 改回：
-```
-transformers==5.2.0
-```
-
-### 步骤6：打补丁（修复与 transformers 5.2.0 的 API 不兼容）
-
-按照**十二、遇到的问题和解决步骤**中的修复逐一操作，共 4 个文件（问题1～4）。
-
-### 步骤7：验证导入
+### 步骤3：验证导入
 
 ```bash
 python -c "from optimum.intel.openvino import OVModelForVisualCausalLM; print('OK')"
@@ -289,17 +239,80 @@ Multiple distributions found for package optimum. Picked distribution: optimum
 OK
 ```
 
-### 步骤8：运行测试
+### 步骤4：打补丁（修复 position_ids shape 不匹配）
+
+如果跳过此步骤，运行 `test_qwen3.5.py` 会遇到以下报错：
+```
+[GPU] The input tensor size is not equal to model port shape, can't handle input tensor
+with name: parameter:position_ids, because model input (shape=[4,?,?]) and tensor (shape=[3,1,472]) are incompatible
+```
+
+根本原因见**九、遇到的问题和解决步骤 → 问题6**。
+
+编辑文件：
+```
+/home/intel/miniforge3/envs/arl_env/lib/python3.12/site-packages/optimum/intel/openvino/modeling_visual_language.py
+```
+
+找到以下代码（约第 193 行）：
+```python
+if (self.config.model_type in ["qwen2_vl", "qwen3_vl", "qwen3_5", "qwen3_5_moe"]) and position_ids.ndim != 3:
+    position_ids = np.repeat(np.expand_dims(position_ids, 0), 3, axis=0)
+
+inputs["position_ids"] = position_ids
+```
+
+在 `inputs["position_ids"] = position_ids` **之前**插入：
+```python
+# Qwen3_5_moe OV model expects position_ids shape [4, batch, seq]
+# expand from [3, batch, seq] to [4, batch, seq] by prepending text_position_ids
+if self.config.model_type == "qwen3_5_moe" and position_ids.ndim == 3 and position_ids.shape[0] == 3:
+    position_ids = np.concatenate([position_ids[:1], position_ids], axis=0)
+```
+
+### 步骤5：功能验证（运行 test_qwen3.5.py）
+
+补丁打好后，运行以下命令验证模型能正确加载并推理：
 
 ```bash
 cd /home/intel/Qwen3.5_ARL
-
 python test_qwen3.5.py
 ```
 
+脚本通过 `OVModelForVisualCausalLM` 加载模型，在 GPU 上编译，并运行一次样例推理：
+- 传入 `ov_config={"CACHE_DIR": ""}` 禁用模型缓存，避免 GPU plugin 动态 shape 处理的已知问题
+- 修改脚本中的 `model_dir` 和 `device` 变量可测试不同模型或设备
+
+预期成功输出：
+```
+Multiple distributions found for package optimum. Picked distribution: optimum
+Compiling model on device: GPU
+✓ Model compiled successfully on GPU
+Configured device: GPU
+Execution devices:
+  - language_model: ['GPU.0']
+  - vision_embeddings: ['GPU.0']
+  - vision_embeddings_merger: ['GPU.0']
+  - vision_embeddings_pos: ['GPU.0']
+Asked to sample `fps` frames per second but no video metadata was provided ...
+user
+Why is this video funny?
+assistant
+<think>
+...
+</think>
+```
+
+> `Asked to sample fps frames per second ...` 和 `Multiple distributions found for package optimum` 均为正常提示，不影响结果。
+
+> **注意（本机 ARL）：** 运行 35B-A3B 时如遇 `CL_OUT_OF_RESOURCES` 崩溃，说明 iGPU 显存不足，
+> 改用 `device = "AUTO:GPU,CPU"` 或 `device = "CPU"`。
+
+
+
 ---
 
-## 九、注意事项
+## 五、注意事项
 
 - **GPU 显存**：当前机器 iGPU 显存较小（Arrow Lake-P），如果遇到 `CL_OUT_OF_RESOURCES` 崩溃，
   说明显存不足，改用 `device = "CPU"` 或 `device = "AUTO:GPU,CPU"`。
@@ -309,7 +322,7 @@ python test_qwen3.5.py
 
 ---
 
-## 十、成功输出示例
+## 六、成功输出示例
 
 ```
 Compiling model on device: GPU
@@ -331,9 +344,9 @@ The user wants to know why the video is funny.
 
 ---
 
-## 十一、性能基准测试
+## 七、性能基准测试
 
-### 8.1 Text-only LLM 基准（4.1 Text-only LLM benchmark）
+### 7.1 Text-only LLM 基准（7.1 Text-only LLM benchmark）
 
 直接调用 benchmark Python 脚本（脚本内部路径为旧机器，不能直接用 bash 脚本）：
 
@@ -352,7 +365,7 @@ python benchmark_qwen3_5_openvino.py \
 ```
 
 > **注意：** 脚本原始代码缺少 `position_ids` 输入（qwen3_5_moe 模型要求 `[4, batch, seq]`），
-> 已在 `benchmark_qwen3_5_openvino.py` 中补充，自动检测模型输入并构造正确形状的 `position_ids`。
+> 已在 `benchmark_qwen3_5_openvino.py` 中补充，自动检测模型输入并构造正确形状的 `position_ids`。修改你自己的模型路径地址 /home/intel/project/qwen35/Qwen3.5-35B-A3B/INT4/openvino_language_model.xml 
 
 #### 测试结果（intel-AXMB-D150-3, GPU=Intel Arc Graphics Arrow Lake-P iGPU）
 
@@ -408,7 +421,7 @@ Throughput:           8.26 tokens/s  (std 0.06, p50 8.28, p90 8.31, p95 8.31)
 
 ---
 
-### 8.2 Multimodal 基准（4.2 Multimodal benchmark）
+### 7.2 Multimodal 基准（7.2 Multimodal benchmark）
 
 端到端图片 + 文字推理，通过 optimum-intel 完整流水线测试：
 
@@ -493,7 +506,7 @@ Generated tokens/iter (observed): min=512, max=512, mean=512.00
 
 ---
 
-## 十二、遇到的问题和解决步骤
+## 八、遇到的问题和解决步骤
 
 ### 问题1：`No module named 'transformers.onnx'`
 
@@ -622,7 +635,7 @@ if self.config.model_type == "qwen3_5_moe" and position_ids.ndim == 3 and positi
 
 ---
 
-## 十三、requirements.txt 修复
+## 九、requirements.txt 修复
 
 原始文件有以下错误，需修复：
 
@@ -676,11 +689,11 @@ transformers>=4.45,<5.1
 
 ---
 
-## 十四、代码文件改动说明
+## 十、代码文件改动说明
 
 为适配 ARL 机器上的 `qwen3_5_moe` 模型，对仓库中以下文件进行了修改：
 
-### 12.1 `benchmark_qwen3_5_openvino.py`
+### 10.1 `benchmark_qwen3_5_openvino.py`
 
 **问题：** 原脚本的 `prefill_inputs` 和 `decode_inputs` 只传了 `attention_mask`、`inputs_embeds`、`beam_idx` 三个输入，但 `qwen3_5_moe` 的 OV 模型还需要 `position_ids`（shape `[4, batch, seq]`），导致推理报错：
 ```
@@ -725,7 +738,7 @@ if prefill_position_ids is not None:
 
 ---
 
-### 12.2 `requirements.txt`
+### 10.2 `requirements.txt`
 
 **问题1：** 多个包写在同一行（pip 不支持）：
 ```
@@ -745,11 +758,11 @@ openvino==2026.2.0.dev20260402
 **修复：** 删除 `optimum-onnx @ git+...` 行，由 `optimum-intel` 自动拉取。
 
 **问题4：** `transformers==5.2.0` 与 `optimum-intel` 元数据声明的 `transformers<5.1` 冲突，pip resolver 拒绝安装。  
-**修复：** 分两步安装（见八、完整安装步骤），`requirements.txt` 中保留 `transformers==5.2.0`。
+**修复：** 分两步安装（见五、完整安装步骤），`requirements.txt` 中保留 `transformers==5.2.0`。
 
 ---
 
-### 12.3 `test_qwen3.5.py`
+### 10.3 `test_qwen3.5.py`
 
 **原始脚本** 来自 GSG，路径和设备设置针对旧机器（PTL）。在 ARL 机器上做了以下调整：
 
@@ -761,7 +774,7 @@ openvino==2026.2.0.dev20260402
 
 ---
 
-### 12.4 站点包补丁（optimum/openvino，不在 git 仓库中）
+### 10.4 站点包补丁（optimum/openvino，不在 git 仓库中）
 
 以下文件在 conda 环境 `arl_env` 的 site-packages 中直接打补丁，**不属于本仓库**，重装环境后需重新打：
 
@@ -772,4 +785,4 @@ openvino==2026.2.0.dev20260402
 | `optimum/exporters/onnx/_traceable_decorator.py` | `_CAN_RECORD_REGISTRY`、`OutputRecorder` 未实现 | `try/except` + stub 类 |
 | `optimum/intel/openvino/modeling_visual_language.py` | `position_ids` shape `[3,b,s]` 与模型期望 `[4,b,s]` 不匹配 | 在 `prepare_inputs` 中对 `qwen3_5_moe` 做 `np.concatenate` 扩展 |
 
-详细补丁内容见**六、遇到的问题和解决步骤**。
+详细补丁内容见**九、遇到的问题和解决步骤**。

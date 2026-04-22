@@ -148,6 +148,7 @@ openvino-telemetry==2025.2.0
 openvino-tokenizers==2026.2.0.0.dev20260402
 optimum @ git+https://github.com/huggingface/optimum@3db78a41a715a04d4629e21cec4e7b1790c8266f
 optimum-intel @ git+https://github.com/rkazants/optimum-intel.git@4602e000f4ca2c0e04a03c3633d30703b6bb0b05
+optimum-onnx @ git+https://github.com/huggingface/optimum-onnx.git@7c9ccd7331403147c6b2a9f9440cd31f470a08f4
 orjson==3.11.8
 oss2==2.19.1
 overrides==7.7.0
