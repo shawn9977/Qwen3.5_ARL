@@ -130,7 +130,7 @@ pip install -r requirements.txt
 | transformers | 5.2.0 |
 | optimum | 2.1.0.dev0 (git: huggingface/optimum@3db78a4) |
 | optimum-intel | 1.27.0.dev0 (git: rkazants/optimum-intel@4602e00) |
-| optimum-onnx | 自动由 optimum-intel 依赖拉取 (branch: xadupre/transformers5) |
+| optimum-onnx | 手动安装，commit: huggingface/optimum-onnx@7c9ccd7（见四、步骤2） |
 | openvino | 2026.2.0.dev20260402 (nightly) |
 | openvino-tokenizers | 2026.2.0.0.dev20260402 (nightly) |
 | nncf | 3.0.0 |
@@ -247,7 +247,7 @@ OK
 with name: parameter:position_ids, because model input (shape=[4,?,?]) and tensor (shape=[3,1,472]) are incompatible
 ```
 
-根本原因见**九、遇到的问题和解决步骤 → 问题6**。
+根本原因见**八、遇到的问题和解决步骤 → 问题6**。
 
 编辑文件：
 ```
@@ -365,7 +365,9 @@ python benchmark_qwen3_5_openvino.py \
 ```
 
 > **注意：** 脚本原始代码缺少 `position_ids` 输入（qwen3_5_moe 模型要求 `[4, batch, seq]`），
-> 已在 `benchmark_qwen3_5_openvino.py` 中补充，自动检测模型输入并构造正确形状的 `position_ids`。修改你自己的模型路径地址 /home/intel/project/qwen35/Qwen3.5-35B-A3B/INT4/openvino_language_model.xml 
+> 已在 `benchmark_qwen3_5_openvino.py` 中补充，自动检测模型输入并构造正确形状的 `position_ids`。
+>
+> **请将 `--model-xml` 路径替换为你本机的模型路径**，例如：`/path/to/Qwen3.5-35B-A3B/INT4/openvino_language_model.xml`
 
 #### 测试结果（intel-AXMB-D150-3, GPU=Intel Arc Graphics Arrow Lake-P iGPU）
 
@@ -758,7 +760,7 @@ openvino==2026.2.0.dev20260402
 **修复：** 删除 `optimum-onnx @ git+...` 行，由 `optimum-intel` 自动拉取。
 
 **问题4：** `transformers==5.2.0` 与 `optimum-intel` 元数据声明的 `transformers<5.1` 冲突，pip resolver 拒绝安装。  
-**修复：** 分两步安装（见五、完整安装步骤），`requirements.txt` 中保留 `transformers==5.2.0`。
+**修复：** 分两步安装（见**四、完整安装步骤**），`requirements.txt` 中保留 `transformers==5.2.0`。
 
 ---
 
@@ -785,4 +787,4 @@ openvino==2026.2.0.dev20260402
 | `optimum/exporters/onnx/_traceable_decorator.py` | `_CAN_RECORD_REGISTRY`、`OutputRecorder` 未实现 | `try/except` + stub 类 |
 | `optimum/intel/openvino/modeling_visual_language.py` | `position_ids` shape `[3,b,s]` 与模型期望 `[4,b,s]` 不匹配 | 在 `prepare_inputs` 中对 `qwen3_5_moe` 做 `np.concatenate` 扩展 |
 
-详细补丁内容见**九、遇到的问题和解决步骤**。
+详细补丁内容见**八、遇到的问题和解决步骤**。
