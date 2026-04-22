@@ -1,0 +1,283 @@
+diff --git a/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_base.hpp b/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_base.hpp
+index a3b749021c..94bc59dc58 100644
+--- a/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_base.hpp
++++ b/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_base.hpp
+@@ -64,6 +64,7 @@ enum class MOE3GemmInputIndex : uint8_t {
+ struct moe_3gemm_config {
+     int32_t weight_group_size = -1;
+     bool has_batch_dim = false;  // 0 - pa, 1 - non-pa
++    ov::element::Type out_type = ov::element::f32;  // Default fallback
+ };
+ 
+ struct MoE3GemmRuntimeParams : public MoEGemmRuntimeParams {};
+diff --git a/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.cpp b/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.cpp
+index 1d98e6ca0d..c070f500d4 100644
+--- a/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.cpp
++++ b/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.cpp
+@@ -50,7 +50,7 @@ JitConstants MoE3GemmMicroGenerator::get_jit_constants(const kernel_impl_params&
+     jit.make("OPTIONAL_SHAPE_INFO_TENSOR", "");
+ 
+     jit.make("SUBGROUP_SIZE", subgroup_size);
+-    jit.make("OUTPUT_TYPE", to_ocl_type(data_types::f16));  // output
++    jit.make("OUTPUT_TYPE", to_ocl_type(cfg.out_type));  // output
+     jit.make("INPUT0_TYPE", to_ocl_type(data_types::f16));  // input: f16
+ 
+     GPU_DEBUG_TRACE_DETAIL << "\t m_wei_idx: " << m_wei_idx << std::endl;
+@@ -261,8 +261,15 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
+     }
+ 
+     problem_moe.Tb = problem_moe.Tb_ext = micro::Type::f16;
+-    problem_moe.Tc = micro::Type::f32;
+-    problem_moe.Tc_ext = micro::Type::f32;
++    problem_moe.Tc = micro::Type::f32;  // Keep internal accumulation as f32
++    // Set external output type from config
++    auto out_type = desc->_config.out_type;
++    if (out_type == ov::element::dynamic) {
++        // Use input type when dynamic, fallback to f16 if input is also dynamic
++        auto input_type = params.get_input_layout(0).data_type;
++        out_type = (input_type == ov::element::dynamic) ? ov::element::Type(ov::element::f16) : ov::element::Type(input_type);
++    }
++    problem_moe.Tc_ext = convert_type(out_type);
+     problem_moe.Ts = problem_moe.Tc;
+     problem_moe.A.layout = micro::MatrixLayout::T;
+     problem_moe.B.layout = micro::MatrixLayout::N;
+diff --git a/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.hpp b/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.hpp
+index 5185c09501..5b54a2ba14 100644
+--- a/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.hpp
++++ b/src/plugins/intel_gpu/src/graph/impls/ocl_v2/moe/moe_3gemm_gen_micro.hpp
+@@ -68,6 +68,12 @@ public:
+         auto desc = params.typed_desc<moe_3gemm_fused_compressed>();
+         cfg.weight_group_size = static_cast<int32_t>(desc->_config.group_size);
+         cfg.has_batch_dim = desc->_config.has_batch_dim;
++        cfg.out_type = desc->_config.out_type;
++        // Handle dynamic type - use input type or fallback to f16
++        if (cfg.out_type == ov::element::dynamic) {
++            auto input_type = params.get_input_layout(0).data_type;
++            cfg.out_type = (input_type == ov::element::dynamic) ? ov::element::Type(ov::element::f16) : ov::element::Type(input_type);
++        }
+         return cfg;
+     }
+ 
+diff --git a/src/plugins/intel_gpu/src/graph/moe_3gemm_fused.cpp b/src/plugins/intel_gpu/src/graph/moe_3gemm_fused.cpp
+index cdbf197da9..973c922a5e 100644
+--- a/src/plugins/intel_gpu/src/graph/moe_3gemm_fused.cpp
++++ b/src/plugins/intel_gpu/src/graph/moe_3gemm_fused.cpp
+@@ -24,12 +24,38 @@ GPU_DEFINE_PRIMITIVE_TYPE_ID(moe_3gemm_fused_compressed)
+     !* We can be sure, that this method was called AT LEAST once during graph compilation.*!
+ */
+ layout moe_inst::calc_output_layout(const moe_node& /* node */, const kernel_impl_params& impl_param) {
+-    return impl_param.input_layouts[0];
++    auto desc = impl_param.typed_desc<moe_3gemm_fused_compressed>();
++    auto output_layout = impl_param.input_layouts[0];
++
++    // Determine output data type
++    if (desc->_config.out_type != ov::element::dynamic) {
++        // Use explicitly specified type
++        output_layout.data_type = desc->_config.out_type;
++    } else if (output_layout.data_type == ov::element::dynamic) {
++        // Input is dynamic, fallback to f16 (common for GPU inference)
++        output_layout.data_type = ov::element::f16;
++    }
++    // else: keep input's concrete data_type
++
++    return output_layout;
+ }
+ 
+ template <typename ShapeType>
+ std::vector<layout> moe_inst::calc_output_layouts(const moe_node& /* node */, const kernel_impl_params& impl_param) {
+-    return {impl_param.input_layouts[0]};
++    auto desc = impl_param.typed_desc<moe_3gemm_fused_compressed>();
++    auto output_layout = impl_param.input_layouts[0];
++
++    // Determine output data type
++    if (desc->_config.out_type != ov::element::dynamic) {
++        // Use explicitly specified type
++        output_layout.data_type = desc->_config.out_type;
++    } else if (output_layout.data_type == ov::element::dynamic) {
++        // Input is dynamic, fallback to f16 (common for GPU inference)
++        output_layout.data_type = ov::element::f16;
++    }
++    // else: keep input's concrete data_type
++
++    return {output_layout};
+ }
+ 
+ template std::vector<layout> moe_inst::calc_output_layouts<ov::PartialShape>(const moe_node& node, const kernel_impl_params& impl_param);
+diff --git a/src/plugins/intel_gpu/src/graph/primitive_inst.cpp b/src/plugins/intel_gpu/src/graph/primitive_inst.cpp
+index 9f68ae9603..b26f5af0d5 100644
+--- a/src/plugins/intel_gpu/src/graph/primitive_inst.cpp
++++ b/src/plugins/intel_gpu/src/graph/primitive_inst.cpp
+@@ -168,8 +168,7 @@ static memory::ptr get_memory_from_pool(engine& _engine,
+                                 const memory_restricter<uint32_t>& memory_dependencies,
+                                 bool reset = true,
+                                 memory* curr_memory = nullptr) {
+-    OPENVINO_ASSERT(!layout.is_dynamic() || layout.has_upper_bound(),
+-                    "[GPU] Can't allocate output for dynamic layout without upper bound");
++    // Allow dynamic layouts without upper bound - get_tensor()/get_padded_dims() will use default bounds
+     // Use layout with max tensor for dynamic shape with upper bound
+     if (_node.get_program().get_config().get_enable_memory_pool()) {
+         if (curr_memory != nullptr)
+@@ -2666,7 +2665,7 @@ memory::ptr primitive_inst::allocate_output(engine& _engine,
+                                             memory* curr_memory,
+                                             bool runtime_alloc) {
+     const auto& out_layout = impl_params.get_output_layout(idx);
+-    OPENVINO_ASSERT(out_layout.is_static() || out_layout.has_upper_bound(), "[GPU] Can't allocate output for dynamic layout");
++    // Allow dynamic layouts without upper bound - get_tensor()/get_padded_dims() will use default bounds
+     auto device_mem_acc = [&](size_t a, const cldnn::layout& l) {
+         // Input shape may be dynamic is some cases (shape_of). It means that output shape of node doesn't depend on input shape
+         // and out memory can be allocated on program build stage.
+diff --git a/src/plugins/intel_gpu/src/plugin/transformations/convert_moe_to_compressed.cpp b/src/plugins/intel_gpu/src/plugin/transformations/convert_moe_to_compressed.cpp
+index efe0b08525..1fa4e5e26d 100644
+--- a/src/plugins/intel_gpu/src/plugin/transformations/convert_moe_to_compressed.cpp
++++ b/src/plugins/intel_gpu/src/plugin/transformations/convert_moe_to_compressed.cpp
+@@ -332,17 +332,19 @@ ConvertMOEToMOECompressed::ConvertMOEToMOECompressed(bool is_pa) {
+                 OPENVINO_THROW("K dimenion in moe topk input should be static..");
+             }
+             config.top_k = topk_shape[1].get_length();
+-            config.out_type = ov::element::f16;
++            // Set to dynamic so MOE output will follow input type after ConvertPrecision
++            config.out_type = ov::element::dynamic;
+             config.has_batch_dim = is_pa ? 0 : 1;
+             std::shared_ptr<ov::Node> moe_compressed = std::make_shared<ov::intel_gpu::op::MOECompressed>(args, config);
+             moe_compressed->set_friendly_name(moe->get_friendly_name());
+             ov::copy_runtime_info(moe, moe_compressed);
+ 
+-            // Since f16 precision is forced for MOECompressed output, we may need to insert Convert after MOECompressed
+-            // in order not to break the model semantic. This Convert will be most likely optimized at ConvertPrecision stage
+-            if (moe->get_output_element_type(0) != moe_compressed->get_output_element_type(0)) {
++            // Check if we need to insert Convert to match the expected output type
++            // When has_shared_expert, root_node is the Add operation we're replacing, so compare against that
++            auto expected_output_type = has_shared_expert ? root_node->get_output_element_type(0) : moe->get_output_element_type(0);
++            if (expected_output_type != moe_compressed->get_output_element_type(0)) {
+                 moe_compressed->set_friendly_name(moe_compressed->get_friendly_name() + "/MOECompressed");
+-                moe_compressed = std::make_shared<ov::op::v0::Convert>(moe_compressed, moe->get_output_element_type(0));
++                moe_compressed = std::make_shared<ov::op::v0::Convert>(moe_compressed, expected_output_type);
+                 moe_compressed->set_friendly_name(moe->get_friendly_name());
+                 ov::copy_runtime_info(moe, moe_compressed);
+             }
+@@ -377,6 +379,7 @@ ConvertMOEToMOECompressed::ConvertMOEToMOECompressed(bool is_pa) {
+             config.inter_size = weight_shape[1];
+             config.group_size = (weight_shape.size() == 3) ? config.hidden_size : scale_shape[3];
+             config.top_k = topk_shape.rbegin()->get_length();
++            // Set to dynamic so MOE output will follow input type after ConvertPrecision
+             config.out_type = ov::element::dynamic;
+             config.has_batch_dim = is_pa ? 0 : 1;
+ 
+diff --git a/src/plugins/intel_gpu/src/plugin/transformations/op/moe_compressed.cpp b/src/plugins/intel_gpu/src/plugin/transformations/op/moe_compressed.cpp
+index 72fec1aa33..8935a2427f 100644
+--- a/src/plugins/intel_gpu/src/plugin/transformations/op/moe_compressed.cpp
++++ b/src/plugins/intel_gpu/src/plugin/transformations/op/moe_compressed.cpp
+@@ -25,7 +25,18 @@ std::shared_ptr<ov::Node> MOECompressed::clone_with_new_inputs(const ov::OutputV
+ }
+ 
+ void MOECompressed::validate_and_infer_types() {
+-    auto output_type = m_config.out_type == ov::element::dynamic ? get_input_element_type(0) : m_config.out_type;
++    // Use config out_type if specified, otherwise follow input
++    auto output_type = m_config.out_type;
++
++    // If config says dynamic or input is more specific, use input type
++    if (output_type == ov::element::dynamic) {
++        output_type = get_input_element_type(0);
++    }
++
++    // Final safety check: if still dynamic, use f16 (GPU default)
++    if (output_type == ov::element::dynamic) {
++        output_type = ov::element::f16;
++    }
+ 
+     set_output_type(0, output_type, get_input_partial_shape(0));
+ }
+diff --git a/src/plugins/intel_gpu/src/runtime/engine.cpp b/src/plugins/intel_gpu/src/runtime/engine.cpp
+index 16cfb81048..1dd67f0d68 100644
+--- a/src/plugins/intel_gpu/src/runtime/engine.cpp
++++ b/src/plugins/intel_gpu/src/runtime/engine.cpp
+@@ -302,7 +302,6 @@ bool engine::check_allocatable(const layout& layout, allocation_type type) {
+ 
+         // When dynamic shape upper bound makes bigger buffer, then return false.
+         if (exceed_allocatable_mem_size && layout.is_dynamic()) {
+-            OPENVINO_ASSERT(layout.has_upper_bound(), "[GPU] Dynamic shape without upper bound tries to allocate");
+             return false;
+         }
+ 
+@@ -319,7 +318,6 @@ bool engine::check_allocatable(const layout& layout, allocation_type type) {
+ 
+     // When dynamic shape upper bound makes bigger buffer, then return false.
+     if (exceed_available_mem_size && layout.is_dynamic()) {
+-        OPENVINO_ASSERT(layout.has_upper_bound(), "[GPU] Dynamic shape without upper bound tries to allocate");
+         return false;
+     }
+ 
+diff --git a/src/plugins/intel_gpu/src/runtime/layout.cpp b/src/plugins/intel_gpu/src/runtime/layout.cpp
+index 3db8b50dc8..17f22ca123 100644
+--- a/src/plugins/intel_gpu/src/runtime/layout.cpp
++++ b/src/plugins/intel_gpu/src/runtime/layout.cpp
+@@ -126,8 +126,20 @@ std::vector<tensor::value_type> layout::get_dims() const {
+ }
+ 
+ std::vector<tensor::value_type> layout::get_padded_dims() const {
+-    OPENVINO_ASSERT(!is_dynamic() || has_upper_bound(), "[GPU] get_tensor() is called for dynamic shape without upper bound");
+-    ov::Shape shape = is_dynamic() ? size.get_max_shape() : size.to_shape();
++    constexpr int64_t DEFAULT_UPPER_BOUND = 4096;
++    ov::Shape shape;
++    if (is_dynamic()) {
++        for (const auto& dim : size) {
++            if (dim.is_dynamic()) {
++                auto max_len = dim.get_max_length();
++                shape.push_back(max_len == -1 ? DEFAULT_UPPER_BOUND : max_len);
++            } else {
++                shape.push_back(dim.get_length());
++            }
++        }
++    } else {
++        shape = size.to_shape();
++    }
+ 
+     std::vector<tensor::value_type> dims;
+     for (auto dim : shape) {
+@@ -277,11 +289,17 @@ ov::Shape layout::get_shape() const {
+ }
+ 
+ tensor layout::get_tensor() const {
+-    OPENVINO_ASSERT(!is_dynamic() || has_upper_bound(), "[GPU] get_tensor() is called for dynamic shape without upper bound");
++    constexpr int64_t DEFAULT_UPPER_BOUND = 4096;
+     ov::Shape shape;
+-    if (is_dynamic() && has_upper_bound()) {
++    if (is_dynamic()) {
+         for (const auto& dim : size) {
+-            shape.push_back(dim.get_max_length());
++            if (dim.is_dynamic()) {
++                auto max_len = dim.get_max_length();
++                // Use default upper bound for unbounded dynamic dimensions
++                shape.push_back(max_len == -1 ? DEFAULT_UPPER_BOUND : max_len);
++            } else {
++                shape.push_back(dim.get_length());
++            }
+         }
+     } else {
+         shape = size.to_shape();
+diff --git a/src/plugins/intel_gpu/src/runtime/ocl/ocl_engine.cpp b/src/plugins/intel_gpu/src/runtime/ocl/ocl_engine.cpp
+index 141c3fc2cc..f35ed9980c 100644
+--- a/src/plugins/intel_gpu/src/runtime/ocl/ocl_engine.cpp
++++ b/src/plugins/intel_gpu/src/runtime/ocl/ocl_engine.cpp
+@@ -97,7 +97,7 @@ allocation_type ocl_engine::detect_usm_allocation_type(const void* memory) const
+ }
+ 
+ memory::ptr ocl_engine::allocate_memory(const layout& layout, allocation_type type, bool reset) {
+-    OPENVINO_ASSERT(!layout.is_dynamic() || layout.has_upper_bound(), "[GPU] Can't allocate memory for dynamic layout");
++    // Allow dynamic layouts without upper bound - get_tensor()/get_padded_dims() will use default bounds
+ 
+     check_allocatable(layout, type);
+ 
+diff --git a/src/plugins/intel_gpu/src/runtime/ze/ze_engine.cpp b/src/plugins/intel_gpu/src/runtime/ze/ze_engine.cpp
+index e5dd164a25..a1bb5f4657 100644
+--- a/src/plugins/intel_gpu/src/runtime/ze/ze_engine.cpp
++++ b/src/plugins/intel_gpu/src/runtime/ze/ze_engine.cpp
+@@ -70,7 +70,7 @@ allocation_type ze_engine::detect_usm_allocation_type(const void* memory) const
+ }
+ 
+ memory::ptr ze_engine::allocate_memory(const layout& layout, allocation_type type, bool reset) {
+-    OPENVINO_ASSERT(!layout.is_dynamic() || layout.has_upper_bound(), "[GPU] Can't allocate memory for dynamic layout");
++    // Allow dynamic layouts without upper bound - get_tensor()/get_padded_dims() will use default bounds
+ 
+     check_allocatable(layout, type);
+ 
