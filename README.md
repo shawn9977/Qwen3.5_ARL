@@ -4,7 +4,7 @@
 **GPU：** Intel Arc Graphics (Arrow Lake-P iGPU, arch=v12.74.4)  
 **OS：** Ubuntu 24.04, Linux 6.17.0-22  
 **Python：** 3.12.13 (conda 环境 `arl_env`)  
-**完成日期：** 2026-04-21  
+**完成日期：** 2026-04-23  
 
 ---
 
@@ -499,12 +499,16 @@ Generated tokens/iter (observed): min=512, max=512, mean=512.00
 
 #### 汇总对比
 
-| 测试模式 | SeqLen / Prompt tokens | New tokens | Warmup/Iters | TTFT (mean) | TPOT (mean) | Throughput |
-|---|---|---|---|---|---|---|
-| Text-only (LLM) | 1024 | 64 | 3/5 | 33317 ms | 51.8 ms | 1.75 tok/s |
-| Text-only (LLM) | 1024 | 512 | 3/10 | 33484 ms | 55.8 ms | 8.26 tok/s |
-| Multimodal (image+text) | 1408 | 64 | 3/5 | 40227 ms | 80.2 ms | 1.41 tok/s |
-| Multimodal (image+text) | 1408 | 512 | 3/10 | 40215 ms | 83.2 ms | 6.20 tok/s |
+> 测试机器：intel-AXMB-D150-3，GPU：Intel Arc Graphics (Arrow Lake-P iGPU)，Batch=1，num-streams=1
+
+| 量化精度 | 测试模式 | SeqLen / Prompt tokens | New tokens | Warmup/Iters | TTFT (mean) | TPOT (mean) | Throughput |
+|---|---|---|---|---|---|---|---|
+| **INT4** | Text-only (LLM) | 1024 | 64 | 3/5 | 33317 ms | 51.8 ms | 1.75 tok/s |
+| **INT4** | Text-only (LLM) | 1024 | 512 | 3/10 | 33484 ms | 55.8 ms | 8.26 tok/s |
+| **INT4** | Multimodal (image+text) | 1408 | 64 | 3/5 | 40227 ms | 80.2 ms | 1.41 tok/s |
+| **INT4** | Multimodal (image+text) | 1408 | 512 | 3/10 | 40215 ms | 83.2 ms | 6.20 tok/s |
+| **INT8** | Text-only (LLM) | 1024 | 64 | 3/5 | 32870 ms | 63.8 ms | 1.74 tok/s |
+| **INT8** | Text-only (LLM) | 1024 | 512 | 3/10 | 31553 ms | 65.5 ms | 7.87 tok/s |
 
 ---
 
