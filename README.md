@@ -509,6 +509,8 @@ Generated tokens/iter (observed): min=512, max=512, mean=512.00
 | **INT4** | Multimodal (image+text) | 1408 | 512 | 3/10 | 40215 ms | 83.2 ms | 6.20 tok/s |
 | **INT8** | Text-only (LLM) | 1024 | 64 | 3/5 | 32870 ms | 63.8 ms | 1.74 tok/s |
 | **INT8** | Text-only (LLM) | 1024 | 512 | 3/10 | 31553 ms | 65.5 ms | 7.87 tok/s |
+| **INT8** | Multimodal (image+text) | 1408 | 64 | 3/5 | 36286 ms | 95.6 ms | 1.51 tok/s |
+| **INT8** | Multimodal (image+text) | 1408 | 512 | 3/10 | 37208 ms | 99.2 ms | 5.83 tok/s |
 
 ---
 
